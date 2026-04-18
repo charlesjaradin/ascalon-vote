@@ -1,5 +1,13 @@
 import { useState, useEffect, useRef } from "react";
 
+const SUPABASE_URL = "https://cgxlmjixtzdtgupaosch.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNneGxtaml4dHpkdGd1cGFvc2NoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY0NjQ5NjMsImV4cCI6MjA5MjA0MDk2M30.WGkrwVzMcOhezU5w6vHDOFKGSBqLJX0rJRZBOuHtJVU";
+const MATCH_KEY = "ascalon-match-id";
+const VOTED_KEY = "ascalon-voted";
+const PLAYERS_KEY = "ascalon-players-v2";
+const HISTORY_KEY = "ascalon-history-v2";
+const ADMIN_CODE = "1234";
+
 const DEFAULT_PLAYERS = [
   "Agnès", "Aline", "Anne", "Anne-France", "Camille L.",
   "Camille N.", "Camille P.", "Caroline", "Denise", "Elisabeth",
@@ -8,23 +16,52 @@ const DEFAULT_PLAYERS = [
   "Sophie J.", "Stéphanie", "Virginie", "Xavier"
 ];
 
-const VOTES_KEY = "ascalon-votes-v2";
-const HISTORY_KEY = "ascalon-history-v2";
-const PLAYERS_KEY = "ascalon-players-v2";
-const VOTED_KEY = "ascalon-has-voted";
-const ADMIN_CODE = "1234";
-
 const colors = {
   bg: "#0d1117", card: "#161b22", border: "#21262d",
   gold: "#f0c040", funny: "#e05a8a", text: "#e6edf3", muted: "#7d8590",
 };
 
-function sget(key, fallback = null) {
+function lget(key, fallback = null) {
   try { const r = localStorage.getItem(key); return r ? JSON.parse(r) : fallback; }
   catch { return fallback; }
 }
-function sset(key, val) {
+function lset(key, val) {
   try { localStorage.setItem(key, JSON.stringify(val)); } catch {}
+}
+
+function getMatchId() {
+  let id = lget(MATCH_KEY);
+  if (!id) { id = Date.now().toString(); lset(MATCH_KEY, id); }
+  return id;
+}
+
+async function fetchVotes(matchId) {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/votes?match_id=eq.${matchId}&select=*`, {
+      headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}` }
+    });
+    return await res.json();
+  } catch { return []; }
+}
+
+async function insertVote(vote) {
+  await fetch(`${SUPABASE_URL}/rest/v1/votes`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "apikey": SUPABASE_KEY,
+      "Authorization": `Bearer ${SUPABASE_KEY}`,
+      "Prefer": "return=minimal",
+    },
+    body: JSON.stringify(vote),
+  });
+}
+
+async function deleteVotes(matchId) {
+  await fetch(`${SUPABASE_URL}/rest/v1/votes?match_id=eq.${matchId}`, {
+    method: "DELETE",
+    headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}` }
+  });
 }
 
 function tally(votes, category) {
@@ -36,7 +73,8 @@ function topPlayer(votes, category) {
   const t = tally(votes, category); return t.length > 0 ? t[0][0] : null;
 }
 function getMessages(votes, category) {
-  return votes.filter(v => v[`${category}Msg`]).map(v => ({ player: v[category], msg: v[`${category}Msg`] }));
+  const msgKey = category === "sylver" ? "sylver_msg" : "funny_msg";
+  return votes.filter(v => v[msgKey]).map(v => ({ player: v[category], msg: v[msgKey] }));
 }
 
 const S = {
@@ -104,14 +142,16 @@ function Confetti({ active }) {
 
 export default function App() {
   const [screen, setScreen] = useState("home");
-  const [votes, setVotes] = useState(() => sget(VOTES_KEY, []));
-  const [players, setPlayers] = useState(() => sget(PLAYERS_KEY, DEFAULT_PLAYERS));
-  const [history, setHistory] = useState(() => sget(HISTORY_KEY, []));
-  const [hasVoted, setHasVoted] = useState(() => sget(VOTED_KEY, false));
+  const [votes, setVotes] = useState([]);
+  const [players, setPlayers] = useState(() => lget(PLAYERS_KEY, DEFAULT_PLAYERS));
+  const [history, setHistory] = useState(() => lget(HISTORY_KEY, []));
+  const [hasVoted, setHasVoted] = useState(() => lget(VOTED_KEY, false));
+  const [matchId] = useState(() => getMatchId());
   const [sylver, setSylver] = useState(null);
   const [funny, setFunny] = useState(null);
   const [sylverMsg, setSylverMsg] = useState("");
   const [funnyMsg, setFunnyMsg] = useState("");
+  const [loading, setLoading] = useState(false);
   const [revealStep, setRevealStep] = useState(0);
   const [revealFunny, setRevealFunny] = useState(false);
   const [revealSylver, setRevealSylver] = useState(false);
@@ -121,16 +161,23 @@ export default function App() {
   const [newPlayerName, setNewPlayerName] = useState("");
   const [matchLabel, setMatchLabel] = useState("");
 
-  const submitVote = () => {
-    const updated = [...votes, { sylver, funny, sylverMsg: sylverMsg.trim(), funnyMsg: funnyMsg.trim(), ts: Date.now() }];
-    sset(VOTES_KEY, updated); setVotes(updated);
-    sset(VOTED_KEY, true); setHasVoted(true);
-    setScreen("confirm");
+  useEffect(() => {
+    fetchVotes(matchId).then(setVotes);
+    const interval = setInterval(() => fetchVotes(matchId).then(setVotes), 10000);
+    return () => clearInterval(interval);
+  }, [matchId]);
+
+  const submitVote = async () => {
+    setLoading(true);
+    await insertVote({ sylver, funny, sylver_msg: sylverMsg.trim(), funny_msg: funnyMsg.trim(), match_id: matchId });
+    lset(VOTED_KEY, true); setHasVoted(true);
+    const updated = await fetchVotes(matchId); setVotes(updated);
+    setLoading(false); setScreen("confirm");
   };
 
   const savePlayers = (list) => {
     const sorted = [...list].sort((a, b) => a.localeCompare(b, "fr"));
-    setPlayers(sorted); sset(PLAYERS_KEY, sorted);
+    setPlayers(sorted); lset(PLAYERS_KEY, sorted);
   };
 
   const addPlayer = () => {
@@ -141,7 +188,7 @@ export default function App() {
 
   const removePlayer = (name) => savePlayers(players.filter(p => p !== name));
 
-  const archiveMatch = () => {
+  const archiveMatch = async () => {
     const label = matchLabel.trim() || `Match du ${new Date().toLocaleDateString("fr-BE")}`;
     const entry = {
       label, date: new Date().toISOString(),
@@ -150,15 +197,19 @@ export default function App() {
       totalVotes: votes.length,
     };
     const updated = [entry, ...history];
-    sset(HISTORY_KEY, updated); setHistory(updated);
-    sset(VOTES_KEY, []); setVotes([]);
-    sset(VOTED_KEY, false); setHasVoted(false);
-    setMatchLabel(""); setAdminUnlocked(false); setScreen("home");
+    lset(HISTORY_KEY, updated); setHistory(updated);
+    await deleteVotes(matchId);
+    const newId = Date.now().toString(); lset(MATCH_KEY, newId);
+    lset(VOTED_KEY, false); setHasVoted(false);
+    setVotes([]); setMatchLabel(""); setAdminUnlocked(false); setScreen("home");
+    window.location.reload();
   };
 
-  const resetVotes = () => {
-    sset(VOTES_KEY, []); setVotes([]);
-    sset(VOTED_KEY, false); setHasVoted(false);
+  const resetVotes = async () => {
+    await deleteVotes(matchId);
+    const newId = Date.now().toString(); lset(MATCH_KEY, newId);
+    lset(VOTED_KEY, false); setHasVoted(false);
+    setVotes([]); window.location.reload();
   };
 
   const tryAdminCode = () => {
@@ -169,7 +220,6 @@ export default function App() {
 
   const canSubmit = sylver && funny;
 
-  // HOME
   if (screen === "home") return (
     <div style={S.app}>
       <div style={S.header}>
@@ -206,7 +256,6 @@ export default function App() {
     </div>
   );
 
-  // VOTE
   if (screen === "vote") return (
     <div style={S.app}>
       <div style={S.header}>
@@ -230,15 +279,14 @@ export default function App() {
           </div>
           {funny && <textarea style={S.textarea} rows={2} placeholder={`Un mot pour ${funny} ? (optionnel)`} value={funnyMsg} onChange={e => setFunnyMsg(e.target.value)} maxLength={140} />}
         </div>
-        <button style={S.btnPrimary(!canSubmit)} onClick={canSubmit ? submitVote : undefined}>
-          Confirmer mon vote ✓
+        <button style={S.btnPrimary(!canSubmit || loading)} onClick={canSubmit && !loading ? submitVote : undefined}>
+          {loading ? "Envoi..." : "Confirmer mon vote ✓"}
         </button>
         <button style={S.btnSecondary} onClick={() => setScreen("home")}>← Retour</button>
       </div>
     </div>
   );
 
-  // CONFIRM
   if (screen === "confirm") return (
     <div style={S.app}>
       <div style={{ ...S.header, paddingBottom: 28 }}>
@@ -271,7 +319,6 @@ export default function App() {
     </div>
   );
 
-  // ADMIN LOGIN
   if (screen === "adminLogin") return (
     <div style={S.app}>
       <div style={S.header}>
@@ -291,7 +338,6 @@ export default function App() {
     </div>
   );
 
-  // RESULTS
   if (screen === "results") {
     const sylverTally = tally(votes, "sylver");
     const funnyTally = tally(votes, "funny");
@@ -351,7 +397,6 @@ export default function App() {
     );
   }
 
-  // REVEAL
   if (screen === "reveal") {
     const winFunny = topPlayer(votes, "funny");
     const winSylver = topPlayer(votes, "sylver");
@@ -392,7 +437,6 @@ export default function App() {
     );
   }
 
-  // MANAGE PLAYERS
   if (screen === "managePlayers") return (
     <div style={S.app}>
       <div style={S.header}>
@@ -417,7 +461,6 @@ export default function App() {
     </div>
   );
 
-  // HISTORY
   if (screen === "history") return (
     <div style={S.app}>
       <div style={S.header}>
