@@ -30,9 +30,9 @@ function lset(key, val) {
 }
 
 function getMatchId() {
-  let id = lget(MATCH_KEY);
-  if (!id) { id = Date.now().toString(); lset(MATCH_KEY, id); }
-  return id;
+  return "match-actuel";
+}
+
 }
 
 async function fetchVotes(matchId) {
