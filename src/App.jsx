@@ -11,6 +11,7 @@ const DEFAULT_PLAYERS = [
 const VOTES_KEY = "ascalon-votes-v2";
 const HISTORY_KEY = "ascalon-history-v2";
 const PLAYERS_KEY = "ascalon-players-v2";
+const VOTED_KEY = "ascalon-has-voted";
 const ADMIN_CODE = "1234";
 
 const colors = {
@@ -106,26 +107,25 @@ export default function App() {
   const [votes, setVotes] = useState(() => sget(VOTES_KEY, []));
   const [players, setPlayers] = useState(() => sget(PLAYERS_KEY, DEFAULT_PLAYERS));
   const [history, setHistory] = useState(() => sget(HISTORY_KEY, []));
+  const [hasVoted, setHasVoted] = useState(() => sget(VOTED_KEY, false));
   const [sylver, setSylver] = useState(null);
   const [funny, setFunny] = useState(null);
   const [sylverMsg, setSylverMsg] = useState("");
   const [funnyMsg, setFunnyMsg] = useState("");
-  const [loading, setLoading] = useState(false);
   const [revealStep, setRevealStep] = useState(0);
   const [revealFunny, setRevealFunny] = useState(false);
   const [revealSylver, setRevealSylver] = useState(false);
   const [adminUnlocked, setAdminUnlocked] = useState(false);
   const [adminCodeInput, setAdminCodeInput] = useState("");
   const [adminCodeError, setAdminCodeError] = useState(false);
-  const [adminTap, setAdminTap] = useState(0);
   const [newPlayerName, setNewPlayerName] = useState("");
   const [matchLabel, setMatchLabel] = useState("");
 
   const submitVote = () => {
-    setLoading(true);
     const updated = [...votes, { sylver, funny, sylverMsg: sylverMsg.trim(), funnyMsg: funnyMsg.trim(), ts: Date.now() }];
     sset(VOTES_KEY, updated); setVotes(updated);
-    setLoading(false); setScreen("confirm");
+    sset(VOTED_KEY, true); setHasVoted(true);
+    setScreen("confirm");
   };
 
   const savePlayers = (list) => {
@@ -152,14 +152,13 @@ export default function App() {
     const updated = [entry, ...history];
     sset(HISTORY_KEY, updated); setHistory(updated);
     sset(VOTES_KEY, []); setVotes([]);
+    sset(VOTED_KEY, false); setHasVoted(false);
     setMatchLabel(""); setAdminUnlocked(false); setScreen("home");
   };
 
-  const resetVotes = () => { sset(VOTES_KEY, []); setVotes([]); };
-
-  const handleAdminTap = () => {
-    const n = adminTap + 1; setAdminTap(n);
-    if (n >= 5) { setAdminTap(0); setScreen("adminLogin"); }
+  const resetVotes = () => {
+    sset(VOTES_KEY, []); setVotes([]);
+    sset(VOTED_KEY, false); setHasVoted(false);
   };
 
   const tryAdminCode = () => {
@@ -170,6 +169,7 @@ export default function App() {
 
   const canSubmit = sylver && funny;
 
+  // HOME
   if (screen === "home") return (
     <div style={S.app}>
       <div style={S.header}>
@@ -193,13 +193,20 @@ export default function App() {
             <div><div style={{ fontWeight: "bold", color: colors.funny }}>Funny</div><div style={{ fontSize: 12, color: colors.muted }}>La plus drôle du match</div></div>
           </div>
         </div>
-        <button style={S.btnPrimary(false)} onClick={() => setScreen("vote")}>Voter maintenant →</button>
+        {hasVoted
+          ? <div style={{ ...S.warningBox, textAlign: "center", fontSize: 14 }}>✅ Vous avez déjà voté pour ce match !</div>
+          : <button style={S.btnPrimary(false)} onClick={() => setScreen("vote")}>Voter maintenant →</button>
+        }
         <button style={S.btnSecondary} onClick={() => setScreen("results")}>Voir les résultats</button>
         <button style={{ ...S.btnSecondary, marginTop: 6 }} onClick={() => setScreen("history")}>📋 Historique des matchs</button>
+        <div style={{ textAlign: "center", marginTop: 32 }}>
+          <button onClick={() => setScreen("adminLogin")} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 18, opacity: 0.25 }}>🔐</button>
+        </div>
       </div>
     </div>
   );
 
+  // VOTE
   if (screen === "vote") return (
     <div style={S.app}>
       <div style={S.header}>
@@ -223,14 +230,15 @@ export default function App() {
           </div>
           {funny && <textarea style={S.textarea} rows={2} placeholder={`Un mot pour ${funny} ? (optionnel)`} value={funnyMsg} onChange={e => setFunnyMsg(e.target.value)} maxLength={140} />}
         </div>
-        <button style={S.btnPrimary(!canSubmit || loading)} onClick={canSubmit && !loading ? submitVote : undefined}>
-          {loading ? "Envoi..." : "Confirmer mon vote ✓"}
+        <button style={S.btnPrimary(!canSubmit)} onClick={canSubmit ? submitVote : undefined}>
+          Confirmer mon vote ✓
         </button>
         <button style={S.btnSecondary} onClick={() => setScreen("home")}>← Retour</button>
       </div>
     </div>
   );
 
+  // CONFIRM
   if (screen === "confirm") return (
     <div style={S.app}>
       <div style={{ ...S.header, paddingBottom: 28 }}>
@@ -263,6 +271,7 @@ export default function App() {
     </div>
   );
 
+  // ADMIN LOGIN
   if (screen === "adminLogin") return (
     <div style={S.app}>
       <div style={S.header}>
@@ -282,6 +291,7 @@ export default function App() {
     </div>
   );
 
+  // RESULTS
   if (screen === "results") {
     const sylverTally = tally(votes, "sylver");
     const funnyTally = tally(votes, "funny");
@@ -293,9 +303,7 @@ export default function App() {
         <div style={S.header}>
           <span style={S.badge}>🏑 Résultats</span>
           <h1 style={S.title}>Palmarès du match</h1>
-          <p style={{ ...S.subtitle, cursor: "default" }} onClick={handleAdminTap}>
-            {votes.length} vote{votes.length !== 1 ? "s" : ""} · {adminUnlocked ? "🔓 Admin actif" : "tap ×5 → admin"}
-          </p>
+          <p style={S.subtitle}>{votes.length} vote{votes.length !== 1 ? "s" : ""}</p>
         </div>
         <div style={S.body}>
           {votes.length > 0 && winner.sylver && winner.funny && (
@@ -343,6 +351,7 @@ export default function App() {
     );
   }
 
+  // REVEAL
   if (screen === "reveal") {
     const winFunny = topPlayer(votes, "funny");
     const winSylver = topPlayer(votes, "sylver");
@@ -365,7 +374,7 @@ export default function App() {
         {revealStep === 1 && (
           <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 32, textAlign: "center" }}>
             <p style={{ fontSize: 11, letterSpacing: 2, textTransform: "uppercase", color: colors.funny, marginBottom: 16 }}>😂 Funny — La plus drôle</p>
-            <div style={{ fontSize: 52, fontWeight: "bold", color: colors.funny, opacity: revealFunny ? 1 : 0, transform: revealFunny ? "scale(1)" : "scale(0.5)", transition: "all 0.6s cubic-bezier(0.34,1.56,0.64,1)", marginBottom: 20, lineHeight: 1.2 }}>{winFunny}</div>
+            <div style={{ fontSize: 52, fontWeight: "bold", color: colors.funny, opacity: revealFunny ? 1 : 0, transform: revealFunny ? "scale(1)" : "scale(0.5)", transition: "all 0.6s cubic-bezier(0.34,1.56,0.64,1)", marginBottom: 20 }}>{winFunny}</div>
             {revealFunny && funnyMsgsWinner.length > 0 && <div style={{ marginBottom: 24, maxWidth: 320 }}>{funnyMsgsWinner.map((m, i) => <div key={i} style={{ ...S.msgCard, textAlign: "left", marginBottom: 8 }}><p style={{ margin: 0, color: colors.muted, fontStyle: "italic" }}>"{m.msg}"</p></div>)}</div>}
             {revealFunny && <button style={{ ...S.btnPrimary(false), background: `linear-gradient(135deg, ${colors.gold}, #d4a017)`, marginTop: 8 }}
               onClick={() => { setRevealStep(2); setTimeout(() => setRevealSylver(true), 300); }}>🏆 Révéler la Sylver →</button>}
@@ -374,7 +383,7 @@ export default function App() {
         {revealStep === 2 && (
           <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 32, textAlign: "center" }}>
             <p style={{ fontSize: 11, letterSpacing: 2, textTransform: "uppercase", color: colors.gold, marginBottom: 16 }}>🏆 Sylver — Meilleure joueuse</p>
-            <div style={{ fontSize: 52, fontWeight: "bold", color: colors.gold, opacity: revealSylver ? 1 : 0, transform: revealSylver ? "scale(1)" : "scale(0.5)", transition: "all 0.6s cubic-bezier(0.34,1.56,0.64,1)", marginBottom: 20, lineHeight: 1.2 }}>{winSylver}</div>
+            <div style={{ fontSize: 52, fontWeight: "bold", color: colors.gold, opacity: revealSylver ? 1 : 0, transform: revealSylver ? "scale(1)" : "scale(0.5)", transition: "all 0.6s cubic-bezier(0.34,1.56,0.64,1)", marginBottom: 20 }}>{winSylver}</div>
             {revealSylver && sylverMsgsWinner.length > 0 && <div style={{ marginBottom: 24, maxWidth: 320 }}>{sylverMsgsWinner.map((m, i) => <div key={i} style={{ ...S.msgCard, textAlign: "left", marginBottom: 8 }}><p style={{ margin: 0, color: colors.muted, fontStyle: "italic" }}>"{m.msg}"</p></div>)}</div>}
             {revealSylver && <button style={S.btnSecondary} onClick={() => setScreen("results")}>Voir les résultats complets →</button>}
           </div>
@@ -383,6 +392,7 @@ export default function App() {
     );
   }
 
+  // MANAGE PLAYERS
   if (screen === "managePlayers") return (
     <div style={S.app}>
       <div style={S.header}>
@@ -407,6 +417,7 @@ export default function App() {
     </div>
   );
 
+  // HISTORY
   if (screen === "history") return (
     <div style={S.app}>
       <div style={S.header}>
@@ -424,12 +435,6 @@ export default function App() {
               <div><div style={{ fontSize: 11, color: colors.gold, textTransform: "uppercase", letterSpacing: 1, marginBottom: 3 }}>🏆 Sylver</div><div style={{ fontWeight: "bold", color: colors.gold }}>{entry.sylver || "—"}</div></div>
               <div><div style={{ fontSize: 11, color: colors.funny, textTransform: "uppercase", letterSpacing: 1, marginBottom: 3 }}>😂 Funny</div><div style={{ fontWeight: "bold", color: colors.funny }}>{entry.funny || "—"}</div></div>
             </div>
-            {(entry.sylverMsgs?.filter(m => m.player === entry.sylver).length > 0 || entry.funnyMsgs?.filter(m => m.player === entry.funny).length > 0) && (
-              <div style={{ marginTop: 10, borderTop: `1px solid ${colors.border}`, paddingTop: 10 }}>
-                {entry.sylverMsgs?.filter(m => m.player === entry.sylver).map((m, j) => <p key={j} style={{ margin: "0 0 4px", fontSize: 12, color: colors.muted, fontStyle: "italic" }}>🏆 "{m.msg}"</p>)}
-                {entry.funnyMsgs?.filter(m => m.player === entry.funny).map((m, j) => <p key={j} style={{ margin: "0 0 4px", fontSize: 12, color: colors.muted, fontStyle: "italic" }}>😂 "{m.msg}"</p>)}
-              </div>
-            )}
           </div>
         ))}
         <button style={S.btnSecondary} onClick={() => setScreen("home")}>← Accueil</button>
