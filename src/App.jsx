@@ -40,28 +40,42 @@ async function fetchVotes(matchId) {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/votes?match_id=eq.${matchId}&select=*`, {
       headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}` }
     });
+    if (!res.ok) return [];
     return await res.json();
   } catch { return []; }
 }
 
 async function insertVote(vote) {
-  await fetch(`${SUPABASE_URL}/rest/v1/votes`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "apikey": SUPABASE_KEY,
-      "Authorization": `Bearer ${SUPABASE_KEY}`,
-      "Prefer": "return=minimal",
-    },
-    body: JSON.stringify(vote),
-  });
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/votes`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "apikey": SUPABASE_KEY,
+        "Authorization": `Bearer ${SUPABASE_KEY}`,
+        "Prefer": "return=minimal",
+      },
+      body: JSON.stringify(vote),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      alert("Erreur vote: " + err);
+      return false;
+    }
+    return true;
+  } catch(e) {
+    alert("Erreur réseau: " + e.message);
+    return false;
+  }
 }
 
 async function deleteVotes(matchId) {
-  await fetch(`${SUPABASE_URL}/rest/v1/votes?match_id=eq.${matchId}`, {
-    method: "DELETE",
-    headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}` }
-  });
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/votes?match_id=eq.${matchId}`, {
+      method: "DELETE",
+      headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}` }
+    });
+  } catch {}
 }
 
 function tally(votes, category) {
@@ -169,10 +183,19 @@ export default function App() {
 
   const submitVote = async () => {
     setLoading(true);
-    await insertVote({ sylver, funny, sylver_msg: sylverMsg.trim(), funny_msg: funnyMsg.trim(), match_id: matchId });
-    lset(VOTED_KEY, true); setHasVoted(true);
-    const updated = await fetchVotes(matchId); setVotes(updated);
-    setLoading(false); setScreen("confirm");
+    const ok = await insertVote({
+      sylver,
+      funny,
+      sylver_msg: sylverMsg.trim(),
+      funny_msg: funnyMsg.trim(),
+      match_id: matchId
+    });
+    if (ok) {
+      lset(VOTED_KEY, true); setHasVoted(true);
+      const updated = await fetchVotes(matchId); setVotes(updated);
+      setScreen("confirm");
+    }
+    setLoading(false);
   };
 
   const savePlayers = (list) => {
@@ -199,16 +222,16 @@ export default function App() {
     const updated = [entry, ...history];
     lset(HISTORY_KEY, updated); setHistory(updated);
     await deleteVotes(matchId);
-    const newId = Date.now().toString(); lset(MATCH_KEY, newId);
-    lset(VOTED_KEY, false); setHasVoted(false);
-    setVotes([]); setMatchLabel(""); setAdminUnlocked(false); setScreen("home");
-    window.location.reload();
+    const newId = Date.now().toString();
+    lset(MATCH_KEY, newId); lset(VOTED_KEY, false); setHasVoted(false);
+    setVotes([]); setMatchLabel(""); setAdminUnlocked(false);
+    setScreen("home"); window.location.reload();
   };
 
   const resetVotes = async () => {
     await deleteVotes(matchId);
-    const newId = Date.now().toString(); lset(MATCH_KEY, newId);
-    lset(VOTED_KEY, false); setHasVoted(false);
+    const newId = Date.now().toString();
+    lset(MATCH_KEY, newId); lset(VOTED_KEY, false); setHasVoted(false);
     setVotes([]); window.location.reload();
   };
 
